@@ -1,9 +1,10 @@
 open Mirage_types_lwt
 open Lwt.Infix
 
-module Main (S : STACKV4) =
-struct
+module Main (T : TIME) (M : MCLOCK) (P : PCLOCK) (S : STACKV4) (KEYS : KV_RO) = struct
   module TCP = S.TCPV4
+  module X = Tls_mirage.X509(KEYS)(P)
+  module M = Monitoring_experiments.M.S(T)(P)(M)(S)
 
   let http_header ~status xs =
     let headers = List.map (fun (k, v) -> k ^ ": " ^ v) xs in
@@ -22,12 +23,16 @@ struct
     TCP.writev tcp data >>= fun _ ->
     TCP.close tcp
 
-  let start stack _ info =
+  let start _ _ _ stack keys _ _ info =
     Logs.info (fun m -> m "used packages: %a"
                   Fmt.(Dump.list @@ pair ~sep:(unit ".") string string)
                   info.Mirage_info.packages) ;
     Logs.info (fun m -> m "used libraries: %a"
                   Fmt.(Dump.list string) info.Mirage_info.libraries) ;
+    X.certificate keys (`Name "monitor") >>= fun (certs, key) ->
+    let c = `Single (certs, key) in
+    M.create_tls stack ~hostname:"nqsb.retreat" c;
+
     let data =
       let content_size = Cstruct.len Page.rendered in
       [ header content_size ; Page.rendered ]
